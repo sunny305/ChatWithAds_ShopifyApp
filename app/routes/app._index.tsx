@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -7,12 +7,32 @@ import {
   Card,
   BlockStack,
   InlineStack,
+  Button,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
+import { chatWithAdsAPI } from "../services/chatwith-ads-api.server";
+import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session.shop;
+
+  // Get connector configuration
+  let connectorConfig = null;
+  try {
+    console.log('Attempting to query connector config for shop:', shop);
+    console.log('Prisma client:', typeof prisma);
+    console.log('Prisma connectorConfig:', typeof prisma.connectorConfig);
+    
+    connectorConfig = await prisma.connectorConfig.findUnique({
+      where: { shop },
+    });
+    console.log('Connector config result:', connectorConfig);
+  } catch (error) {
+    console.error('Error querying connector config:', error);
+    // Continue without connector config for now
+  }
 
   // Get comprehensive analytics data
   // Try to fetch orders data, but handle gracefully if not approved
@@ -388,10 +408,41 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   // Shop analytics
-  const shop = analyticsData.data?.shop;
+  const shopData = analyticsData.data?.shop;
   const currentDate = new Date();
-  const shopCreated = shop?.createdAt ? new Date(shop.createdAt) : null;
+  const shopCreated = shopData?.createdAt ? new Date(shopData.createdAt) : null;
   const shopAge = shopCreated ? Math.floor((currentDate.getTime() - shopCreated.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+
+  // Sync data to ChatWith Ads platform (only if connector ID is configured)
+  const shopDomain = shopData?.name || shop;
+  let syncStatus = null;
+  
+  if (connectorConfig?.connectorId && connectorConfig?.isActive) {
+    try {
+      syncStatus = await chatWithAdsAPI.syncShopifyData(shopDomain, {
+        analytics: {
+          totalRevenue: totalRevenue.toFixed(2),
+          totalOrders,
+          totalItems,
+          totalCustomers,
+          activeProducts,
+          // Add other key metrics for the external platform
+        },
+        orders: analyticsData.data?.orders?.edges || [],
+        customers: analyticsData.data?.customers?.edges || [],
+        products: analyticsData.data?.products?.edges || [],
+        collections: analyticsData.data?.collections?.edges || [],
+        shop: shopData || {}
+      }, connectorConfig.connectorId);
+      
+      console.log('Data sync result:', syncStatus);
+    } catch (error) {
+      console.error('Data sync failed:', error);
+      syncStatus = { success: false, error: 'Sync failed' };
+    }
+  } else {
+    syncStatus = { success: false, error: 'Connector ID not configured' };
+  }
 
   return {
     analytics: {
@@ -466,12 +517,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       
       
       // Shop info
-      shopName: shop?.name || 'Your Shop',
-      currency: shop?.currencyCode || 'USD',
+      shopName: shopData?.name || 'Your Shop',
+      currency: shopData?.currencyCode || 'USD',
       shopAge,
-      planName: shop?.plan?.displayName || 'Unknown',
-      isShopifyPlus: shop?.plan?.shopifyPlus || false,
-      isPartnerDevelopment: shop?.plan?.partnerDevelopment || false,
+      planName: shopData?.plan?.displayName || 'Unknown',
+      isShopifyPlus: shopData?.plan?.shopifyPlus || false,
+      isPartnerDevelopment: shopData?.plan?.partnerDevelopment || false,
       
       
       // Data availability
@@ -480,7 +531,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       dataNote: hasOrdersData 
         ? `Analytics based on recent ${totalOrders} orders and ${totalCustomers} customers`
         : 'Product and inventory analytics available. For revenue and customer data, app needs approval for protected customer data.',
-      approvalNeeded: !hasOrdersData
+      approvalNeeded: !hasOrdersData,
+      
+      // Sync status
+      syncStatus: syncStatus?.success ? 'Connected' : 'Disconnected',
+      lastSync: syncStatus?.success ? new Date().toISOString() : null,
+      syncError: syncStatus?.error || null,
+      connectorId: connectorConfig?.connectorId || null,
+      isConfigured: !!(connectorConfig?.connectorId && connectorConfig?.isActive)
     },
     orders: analyticsData.data?.orders?.edges || [],
     customers: analyticsData.data?.customers?.edges || [],
@@ -491,20 +549,76 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function Index() {
-  const { analytics, products } = useLoaderData<typeof loader>();
+  const { analytics } = useLoaderData<typeof loader>();
 
   return (
     <Page>
-      <TitleBar title="Chat With Ads - Comprehensive Analytics Dashboard" />
+      <TitleBar title="ChatWith Ads - Shopify Data Connector" />
       <BlockStack gap="500">
         
+        {/* Connection Status */}
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingLg">
+                  ChatWith Ads Connector Status
+                </Text>
+                <Layout>
+                  <Layout.Section variant="oneThird">
+                    <InlineStack align="space-between">
+                      <Text as="span" variant="bodyMd">Connection Status</Text>
+                      <Text as="span" variant="bodyMd" tone={analytics.syncStatus === 'Connected' ? 'success' : 'critical'}>
+                        {analytics.syncStatus}
+                      </Text>
+                    </InlineStack>
+                  </Layout.Section>
+                  <Layout.Section variant="oneThird">
+                    <InlineStack align="space-between">
+                      <Text as="span" variant="bodyMd">Connector ID</Text>
+                      <Text as="span" variant="bodyMd">
+                        {analytics.connectorId ? `${analytics.connectorId.substring(0, 12)}...` : 'Not set'}
+                      </Text>
+                    </InlineStack>
+                  </Layout.Section>
+                  <Layout.Section variant="oneThird">
+                    <InlineStack align="space-between">
+                      <Text as="span" variant="bodyMd">Last Sync</Text>
+                      <Text as="span" variant="bodyMd">
+                        {analytics.lastSync ? new Date(analytics.lastSync).toLocaleString() : 'Never'}
+                      </Text>
+                    </InlineStack>
+                  </Layout.Section>
+                </Layout>
+                
+                {!analytics.isConfigured && (
+                  <InlineStack align="space-between">
+                    <Text variant="bodyMd" tone="warning">
+                      ⚠️ Connector ID not configured. Click "Setup Connector" to connect your ChatWith Ads account.
+                    </Text>
+                    <Link to="/app/connector">
+                      <Button variant="primary" size="slim">Setup Connector</Button>
+                    </Link>
+                  </InlineStack>
+                )}
+                
+                {analytics.syncError && analytics.isConfigured && (
+                  <Text variant="bodyMd" tone="critical">
+                    Sync Error: {analytics.syncError}
+                  </Text>
+                )}
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+
         {/* Shop Overview */}
         <Layout>
           <Layout.Section>
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingLg">
-                  {analytics.shopName} - Complete Store Analytics
+                  {analytics.shopName} - Shopify Data Overview
                 </Text>
                 <Layout>
                   <Layout.Section variant="oneThird">
@@ -953,13 +1067,42 @@ export default function Index() {
           <Layout.Section>
             <Card>
               <BlockStack gap="200">
-                <Text as="h3" variant="headingMd" tone="success">Complete Analytics Dashboard</Text>
+                <Text as="h3" variant="headingMd" tone="success">ChatWith Ads Integration</Text>
                 <Text variant="bodyMd">
                   {analytics.dataNote}
                 </Text>
                 <Text variant="bodyMd" tone="subdued">
-                  This comprehensive dashboard includes revenue, sales, customer analytics, inventory metrics, and catalog insights. All data is calculated from your store's recent activity.
+                  This connector automatically syncs your Shopify data to the ChatWith Ads platform, enabling unified ad management across all your marketing channels. Your store data is continuously synchronized to provide real-time insights and automated ad optimization.
                 </Text>
+                {analytics.syncStatus === 'Connected' && analytics.isConfigured && (
+                  <Text variant="bodyMd" tone="success">
+                    ✅ Your Shopify data is being successfully synced to ChatWith Ads platform using Connector ID: {analytics.connectorId}
+                  </Text>
+                )}
+                {!analytics.isConfigured && (
+                  <BlockStack gap="200">
+                    <Text variant="bodyMd" tone="warning">
+                      ⚠️ Connector ID not configured. To start syncing your Shopify data:
+                    </Text>
+                    <Text variant="bodyMd">
+                      1. Get your Connector ID from your ChatWith Ads dashboard
+                    </Text>
+                    <Text variant="bodyMd">
+                      2. Go to "Connector Setup" in the navigation menu
+                    </Text>
+                    <Text variant="bodyMd">
+                      3. Enter your Connector ID and save
+                    </Text>
+                    <Link to="/app/connector">
+                      <Button variant="primary">Setup Connector Now</Button>
+                    </Link>
+                  </BlockStack>
+                )}
+                {analytics.syncError && analytics.isConfigured && (
+                  <Text variant="bodyMd" tone="critical">
+                    ❌ Sync Error: {analytics.syncError}. Please check your connector configuration.
+                  </Text>
+                )}
               </BlockStack>
             </Card>
           </Layout.Section>

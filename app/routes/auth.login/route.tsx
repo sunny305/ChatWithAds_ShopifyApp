@@ -52,7 +52,7 @@ export default function Auth() {
                 type="text"
                 name="shop"
                 label="Shop domain"
-                helpText="example.myshopify.com"
+                helpText="Enter your shop domain"
                 value={shop}
                 onChange={setShop}
                 autoComplete="on"
