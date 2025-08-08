@@ -3,7 +3,7 @@
 client_id = "4ff2c68c4128f87502f27c91d75f8f51"
 name = "Chat With Ads"
 handle = "chat-with-ads"
-application_url = "https://this-writer-clock-ecological.trycloudflare.com"
+application_url = "https://hair-volvo-selections-member.trycloudflare.com"
 embedded = true
 
 [build]
@@ -21,12 +21,24 @@ api_version = "2025-07"
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/compliance/customers/data_request"
+  compliance_topics = [ "customers/data_request" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/compliance/customers/redact"
+  compliance_topics = [ "customers/redact" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/compliance/shop/redact"
+  compliance_topics = [ "shop/redact" ]
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "write_products,read_orders,read_customers,read_analytics"
 
 [auth]
-redirect_urls = ["https://this-writer-clock-ecological.trycloudflare.com/auth/callback", "https://this-writer-clock-ecological.trycloudflare.com/auth/shopify/callback", "https://this-writer-clock-ecological.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://hair-volvo-selections-member.trycloudflare.com/auth/callback", "https://hair-volvo-selections-member.trycloudflare.com/auth/shopify/callback", "https://hair-volvo-selections-member.trycloudflare.com/api/auth/callback"]
 
 [pos]
 embedded = false
