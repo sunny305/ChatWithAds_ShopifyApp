@@ -16,6 +16,7 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { chatWithAdsAPI } from "../services/chatwith-ads-api.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -53,13 +54,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const connectorId = formData.get("connectorId") as string;
   const action = formData.get("_action") as string;
 
+  // If no explicit action provided (e.g., embedded probes), return a no-op 200
+  if (!action) {
+    return json({ ok: true });
+  }
+
   try {
     if (action === "save") {
-      // Validate connector ID format (you can customize this validation)
-      if (connectorId && !/^[a-zA-Z0-9-_]{8,32}$/.test(connectorId)) {
+      // Validate connector ID format
+      const validGenericId = /^[a-zA-Z0-9-_]{6,64}$/.test(connectorId || "");
+      const validCwadsId = (connectorId || "").startsWith("cwads-") && (connectorId || "").length <= 64;
+      if (connectorId && !(validGenericId || validCwadsId)) {
         return json({
-          error: "Connector ID must be 8-32 characters long and contain only letters, numbers, hyphens, and underscores.",
+          error: "Invalid Connector ID. Use the ID from ChatWith Ads (e.g., cwads-xxxxxxxxxxxxxxxx) or an ID 6-64 chars with letters, numbers, - or _.",
         }, { status: 400 });
+      }
+      // If connectorId provided, perform handshake with platform first
+      let isActiveToSave = false;
+      let connectorIdToSave: string | null = null;
+      if (connectorId) {
+        const attach = await chatWithAdsAPI.attachConnector(shop, connectorId);
+        if (!attach.success) {
+          return json({ error: attach.error || "Invalid Connector ID. Please generate an ID in ChatWith Ads and try again." }, { status: 400 });
+        }
+        isActiveToSave = true;
+        connectorIdToSave = connectorId;
+      } else {
+        // Clearing configuration
+        isActiveToSave = false;
+        connectorIdToSave = null;
       }
 
       // Save or update connector configuration
@@ -67,14 +90,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         await prisma.connectorConfig.upsert({
           where: { shop },
           update: {
-            connectorId: connectorId || null,
-            isActive: !!connectorId,
+            connectorId: connectorIdToSave,
+            isActive: isActiveToSave,
             updatedAt: new Date(),
           },
           create: {
             shop,
-            connectorId: connectorId || null,
-            isActive: !!connectorId,
+            connectorId: connectorIdToSave,
+            isActive: isActiveToSave,
           },
         });
       } else {
@@ -83,27 +106,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       return json({
         success: true,
-        message: connectorId 
-          ? "Connector ID saved successfully! Your Shopify data will now sync to ChatWith Ads."
+        message: isActiveToSave
+          ? "Connection verified and saved."
           : "Connector configuration cleared.",
       });
     }
 
     if (action === "test") {
-      // Test connection with the provided connector ID
-      // You can implement actual connection testing here
       if (!connectorId) {
-        return json({
-          error: "Please enter a connector ID to test the connection.",
-        }, { status: 400 });
+        return json({ error: "Please enter a connector ID to test the connection." }, { status: 400 });
       }
-
-      // Simulate connection test (replace with actual API call)
-      return json({
-        success: true,
-        message: "Connection test successful! Connector ID is valid.",
-        testResult: true,
-      });
+      // Handshake: verify connector exists and attach mapping
+      const attach = await chatWithAdsAPI.attachConnector(shop, connectorId);
+      if (!attach.success) {
+        return json({ error: attach.error || "Invalid Connector ID. Please verify in ChatWith Ads." }, { status: 400 });
+      }
+      // Health check against platform API using server env creds
+      const result = await chatWithAdsAPI.testConnection();
+      if (!result.connected) {
+        return json({ error: result.error || "Platform health check failed. Verify API URL/KEY envs." }, { status: 502 });
+      }
+      return json({ success: true, message: "Connection verified." });
     }
 
     return json({ error: "Invalid action" }, { status: 400 });
@@ -120,6 +143,7 @@ export default function ConnectorConfig() {
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const [connectorId, setConnectorId] = useState(initialConnectorId);
+  const [btnAction, setBtnAction] = useState<string | undefined>(undefined);
 
   const isLoading = navigation.state === "submitting";
   const isSaving = navigation.formData?.get("_action") === "save";
@@ -138,11 +162,11 @@ export default function ConnectorConfig() {
                 <Text as="h2" variant="headingLg">
                   Connect Your ChatWith Ads Account
                 </Text>
-                <Text variant="bodyMd">
+                <Text as="p" variant="bodyMd">
                   To sync your Shopify data with ChatWith Ads, enter your unique Connector ID below. 
                   You can find this ID in your ChatWith Ads dashboard under Settings → Integrations → Shopify.
                 </Text>
-                <Text variant="bodyMd" tone="subdued">
+                <Text as="p" variant="bodyMd" tone="subdued">
                   Current shop: <Text as="span" fontWeight="bold">{shop}</Text>
                 </Text>
               </BlockStack>
@@ -151,21 +175,21 @@ export default function ConnectorConfig() {
         </Layout>
 
         {/* Success/Error Messages */}
-        {actionData?.success && (
+        {(actionData as any)?.success && (
           <Layout>
             <Layout.Section>
-              <Banner status="success">
-                {actionData.message}
+              <Banner tone="success">
+                {(actionData as any).message}
               </Banner>
             </Layout.Section>
           </Layout>
         )}
 
-        {actionData?.error && (
+        {(actionData as any)?.error && (
           <Layout>
             <Layout.Section>
-              <Banner status="critical">
-                {actionData.error}
+              <Banner tone="critical">
+                {(actionData as any).error}
               </Banner>
             </Layout.Section>
           </Layout>
@@ -190,6 +214,8 @@ export default function ConnectorConfig() {
                       helpText="Enter the unique connector ID from your ChatWith Ads dashboard"
                       autoComplete="off"
                     />
+                    <input type="hidden" name="_action" value={btnAction || ""} />
+                    <input type="hidden" name="connectorId" value={connectorId} />
                     
                     <InlineStack gap="300">
                       <Button
@@ -197,8 +223,7 @@ export default function ConnectorConfig() {
                         variant="primary"
                         loading={isSaving}
                         disabled={isLoading}
-                        name="_action"
-                        value="save"
+                        onClick={() => setBtnAction('save')}
                       >
                         {connectorId ? "Save Connector ID" : "Clear Configuration"}
                       </Button>
@@ -207,8 +232,7 @@ export default function ConnectorConfig() {
                         submit
                         disabled={!connectorId || isLoading}
                         loading={isTesting}
-                        name="_action"
-                        value="test"
+                        onClick={() => setBtnAction('test')}
                       >
                         Test Connection
                       </Button>
@@ -252,13 +276,13 @@ export default function ConnectorConfig() {
                 </Layout>
                 
                 {isActive && (
-                  <Text variant="bodyMd" tone="success">
+                  <Text as="p" variant="bodyMd" tone="success">
                     Your Shopify data is being synced to ChatWith Ads platform.
                   </Text>
                 )}
                 
                 {!isActive && (
-                  <Text variant="bodyMd" tone="subdued">
+                  <Text as="p" variant="bodyMd" tone="subdued">
                     Configure your connector ID above to start syncing data.
                   </Text>
                 )}
@@ -276,19 +300,19 @@ export default function ConnectorConfig() {
                   Need Help?
                 </Text>
                 <BlockStack gap="200">
-                  <Text variant="bodyMd">
+                  <Text as="p" variant="bodyMd">
                     <Text as="span" fontWeight="bold">Where to find your Connector ID:</Text>
                   </Text>
-                  <Text variant="bodyMd">
+                  <Text as="p" variant="bodyMd">
                     1. Log into your ChatWith Ads dashboard
                   </Text>
-                  <Text variant="bodyMd">
+                  <Text as="p" variant="bodyMd">
                     2. Go to Settings → Integrations → Shopify
                   </Text>
-                  <Text variant="bodyMd">
+                  <Text as="p" variant="bodyMd">
                     3. Copy your unique Connector ID
                   </Text>
-                  <Text variant="bodyMd">
+                  <Text as="p" variant="bodyMd">
                     4. Paste it in the field above and click "Save Connector ID"
                   </Text>
                 </BlockStack>

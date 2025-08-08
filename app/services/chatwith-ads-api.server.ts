@@ -132,8 +132,7 @@ class ChatWithAdsAPI {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${this.config.apiKey}`,
-        },
-        timeout: 5000, // 5 second timeout
+        }
       });
 
       return { connected: response.ok };
@@ -142,6 +141,35 @@ class ChatWithAdsAPI {
         connected: false,
         error: error instanceof Error ? error.message : 'Connection failed',
       };
+    }
+  }
+
+  /**
+   * Attach a connector ID to a shop (provision mapping ahead of first sync)
+   */
+  async attachConnector(shopDomain: string, connectorId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.config.apiUrl || !this.config.apiKey) {
+        return { success: false, error: 'API credentials not configured' };
+      }
+
+      const response = await fetch(`${this.config.apiUrl}/shopify/attach`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify({ shopDomain, connectorId }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Attach failed: ${response.status} ${text}`);
+      }
+
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Attach failed' };
     }
   }
 }
