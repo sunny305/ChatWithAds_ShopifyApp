@@ -3,7 +3,7 @@
 client_id = "4ff2c68c4128f87502f27c91d75f8f51"
 name = "Chat With Ads"
 handle = "chat-with-ads"
-application_url = "https://constantly-buck-history-ww.trycloudflare.com"
+application_url = "https://advice-annotated-taylor-sequences.trycloudflare.com"
 embedded = true
 
 [build]
@@ -38,7 +38,7 @@ api_version = "2025-07"
 scopes = "write_products,read_orders,read_customers,read_analytics"
 
 [auth]
-redirect_urls = ["https://constantly-buck-history-ww.trycloudflare.com/auth/callback", "https://constantly-buck-history-ww.trycloudflare.com/auth/shopify/callback", "https://constantly-buck-history-ww.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://advice-annotated-taylor-sequences.trycloudflare.com/auth/callback", "https://advice-annotated-taylor-sequences.trycloudflare.com/auth/shopify/callback", "https://advice-annotated-taylor-sequences.trycloudflare.com/api/auth/callback"]
 
 [pos]
 embedded = false

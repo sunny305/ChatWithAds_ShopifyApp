@@ -63,10 +63,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (action === "save") {
       // Validate connector ID format
       const validGenericId = /^[a-zA-Z0-9-_]{6,64}$/.test(connectorId || "");
-      const validCwadsId = (connectorId || "").startsWith("cwads-") && (connectorId || "").length <= 64;
-      if (connectorId && !(validGenericId || validCwadsId)) {
+      const validCWAId = (connectorId || "").startsWith("CWA-") && (connectorId || "").length <= 64;
+      if (connectorId && !(validGenericId || validCWAId)) {
         return json({
-          error: "Invalid Connector ID. Use the ID from ChatWith Ads (e.g., cwads-xxxxxxxxxxxxxxxx) or an ID 6-64 chars with letters, numbers, - or _.",
+          error: "Invalid Connector ID. Use the ID from ChatWith Ads (e.g., CWA-xxxxxxxxxxxxxxxx) or an ID 6-64 chars with letters, numbers, - or _.",
         }, { status: 400 });
       }
       // If connectorId provided, perform handshake with platform first
@@ -210,7 +210,7 @@ export default function ConnectorConfig() {
                       label="ChatWith Ads Connector ID"
                       value={connectorId}
                       onChange={setConnectorId}
-                      placeholder="e.g., cwads-abc123-xyz789"
+                      placeholder="e.g., CWA-abc123-xyz789"
                       helpText="Enter the unique connector ID from your ChatWith Ads dashboard"
                       autoComplete="off"
                     />
