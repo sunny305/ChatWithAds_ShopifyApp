@@ -22,9 +22,9 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>Chat With Ads</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Transform your product listings into engaging conversations that drive sales.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
@@ -40,16 +40,13 @@ export default function App() {
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>AI-Powered Chat</strong>. Engage customers with intelligent conversations about your products, answering questions and providing personalized recommendations.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Product Discovery</strong>. Help customers find exactly what they're looking for through natural conversation and smart product matching.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Sales Optimization</strong>. Convert browsers into buyers with contextual product suggestions and real-time assistance throughout their shopping journey.
           </li>
         </ul>
       </div>
