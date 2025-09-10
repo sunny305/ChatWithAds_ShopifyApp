@@ -3,7 +3,7 @@
 client_id = "4ff2c68c4128f87502f27c91d75f8f51"
 name = "Chat With Ads"
 handle = "chat-with-ads"
-application_url = "https://shopify.chatwithads.com"
+application_url = "https://connector.chatwithads.com"
 embedded = true
 
 [build]
@@ -37,7 +37,7 @@ api_version = "2025-07"
 scopes = "write_products,read_orders,read_customers,read_analytics"
 
 [auth]
-redirect_urls = ["https://shopify.chatwithads.com/auth/callback", "https://shopify.chatwithads.com/auth/shopify/callback", "https://shopify.chatwithads.com/api/auth/callback"]
+redirect_urls = ["https://connector.chatwithads.com/auth/callback", "https://connector.chatwithads.com/auth/shopify/callback", "https://connector.chatwithads.com/api/auth/callback"]
 
 [pos]
 embedded = false
