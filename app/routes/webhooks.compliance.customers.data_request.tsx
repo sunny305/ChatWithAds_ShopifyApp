@@ -1,30 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import crypto from "node:crypto";
 import { ComplianceWebhookManager, type ComplianceWebhookPayload } from "../services/compliance-webhooks.server";
-
-function verifyShopifyWebhook(body: string, signature: string): boolean {
-  if (!signature) {
-    console.error("Missing HMAC signature header");
-    return false;
-  }
-
-  const secret = process.env.SHOPIFY_API_SECRET;
-  if (!secret) {
-    console.error("SHOPIFY_API_SECRET environment variable not set");
-    return false;
-  }
-
-  const cleanSignature = signature.replace('sha256=', '');
-  const hmac = crypto.createHmac('sha256', secret);
-  hmac.update(body, 'utf8');
-  const computedSignature = hmac.digest('base64');
-  
-  return crypto.timingSafeEqual(
-    Buffer.from(cleanSignature),
-    Buffer.from(computedSignature)
-  );
-}
+import { WebhookSecurity } from "../utils/webhook-security.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method !== "POST") {
@@ -33,25 +10,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     const body = await request.text();
-    const signature = request.headers.get("x-shopify-hmac-sha256");
     
     console.log('Customer data request webhook received:', {
       method: request.method,
       hasBody: !!body,
       bodyLength: body.length,
-      hasSignature: !!signature,
+      hasSignature: !!WebhookSecurity.extractHmacSignature(request),
       headers: Object.fromEntries(request.headers.entries())
     });
     
-    if (!signature) {
-      console.error("Missing HMAC signature header");
-      return json({ error: "Missing signature" }, { status: 401 });
-    }
-
-    const isValid = verifyShopifyWebhook(body, signature);
-    if (!isValid) {
-      console.error("Invalid webhook signature");
-      return json({ error: "Invalid signature" }, { status: 401 });
+    const verification = await WebhookSecurity.verifyWebhookRequest(request, body);
+    if (!verification.valid) {
+      console.error("HMAC verification failed:", verification.error);
+      return json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const payload = JSON.parse(body) as ComplianceWebhookPayload;

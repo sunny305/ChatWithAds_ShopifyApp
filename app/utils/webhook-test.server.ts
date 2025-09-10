@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { ComplianceWebhookManager, type ComplianceWebhookPayload } from "../services/compliance-webhooks.server";
+import { WebhookSecurity, type WebhookVerificationResult } from "./webhook-security.server";
 
 export class WebhookTester {
   private static createTestSignature(body: string, secret: string): string {
@@ -15,15 +16,72 @@ export class WebhookTester {
     const validSignature = this.createTestSignature(testBody, testSecret);
     const invalidSignature = "sha256=invalid-signature";
 
-    const validResult = ComplianceWebhookManager.verifyWebhookSignature(testBody, validSignature, testSecret);
-    const invalidResult = ComplianceWebhookManager.verifyWebhookSignature(testBody, invalidSignature, testSecret);
+    // Test new centralized WebhookSecurity class
+    const validResult = WebhookSecurity.verifyHmacSignature(testBody, validSignature, testSecret);
+    const invalidResult = WebhookSecurity.verifyHmacSignature(testBody, invalidSignature, testSecret);
+    const missingResult = WebhookSecurity.verifyHmacSignature(testBody, null, testSecret);
+
+    // Test old ComplianceWebhookManager for backward compatibility
+    const oldValidResult = ComplianceWebhookManager.verifyWebhookSignature(testBody, validSignature, testSecret);
+    const oldInvalidResult = ComplianceWebhookManager.verifyWebhookSignature(testBody, invalidSignature, testSecret);
+
+    const newTestsPassed = validResult.valid && !invalidResult.valid && !missingResult.valid;
+    const oldTestsPassed = oldValidResult && !oldInvalidResult;
 
     return {
-      success: validResult && !invalidResult,
+      success: newTestsPassed && oldTestsPassed,
       details: {
-        validSignatureTest: validResult,
-        invalidSignatureTest: invalidResult,
-        testSignature: validSignature
+        newWebhookSecurity: {
+          validSignature: validResult,
+          invalidSignature: invalidResult,
+          missingSignature: missingResult
+        },
+        oldComplianceManager: {
+          validSignature: oldValidResult,
+          invalidSignature: oldInvalidResult
+        },
+        testSignature: validSignature,
+        allTestsPassed: newTestsPassed && oldTestsPassed
+      }
+    };
+  }
+
+  static testWebhookSecurityUtility(): { success: boolean; details: any } {
+    const testSecret = "test-webhook-secret";
+    const testPayload = JSON.stringify({
+      shop_domain: "test-shop.myshopify.com",
+      customer: { id: 123, email: "test@example.com" }
+    });
+
+    // Create mock request
+    const mockRequest = new Request('https://example.com/webhook', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-shopify-hmac-sha256': this.createTestSignature(testPayload, testSecret)
+      },
+      body: testPayload
+    });
+
+    // Test signature extraction
+    const extractedSignature = WebhookSecurity.extractHmacSignature(mockRequest);
+    const hasValidSignature = !!extractedSignature;
+
+    // Test environment validation
+    const envValidation = WebhookSecurity.validateEnvironment();
+    const envValid = envValidation.length === 0;
+
+    return {
+      success: hasValidSignature && envValid,
+      details: {
+        signatureExtraction: {
+          success: hasValidSignature,
+          signature: extractedSignature
+        },
+        environmentValidation: {
+          success: envValid,
+          missing: envValidation
+        }
       }
     };
   }
@@ -115,5 +173,45 @@ export class WebhookTester {
         mandatoryWebhooks: ComplianceWebhookManager.getMandatoryWebhooks()
       }
     };
+  }
+
+  static async runAllTests(): Promise<{ success: boolean; results: any }> {
+    console.log('🔐 Running comprehensive webhook security tests...\n');
+    
+    const results = {
+      hmacVerification: this.testHMACVerification(),
+      webhookSecurity: this.testWebhookSecurityUtility(),
+      mandatoryValidation: this.testMandatoryWebhookValidation(),
+      complianceHandlers: await this.testComplianceHandlers()
+    };
+
+    const allPassed = Object.values(results).every(result => result.success);
+
+    // Log results
+    Object.entries(results).forEach(([testName, result]) => {
+      const status = result.success ? '✅' : '❌';
+      console.log(`${status} ${testName}: ${result.success ? 'PASSED' : 'FAILED'}`);
+      if (!result.success && result.details) {
+        console.log('   Details:', JSON.stringify(result.details, null, 2));
+      }
+    });
+
+    console.log(`\n📊 Overall result: ${allPassed ? '✅ ALL TESTS PASSED' : '❌ SOME TESTS FAILED'}`);
+
+    return { success: allPassed, results };
+  }
+}
+
+/**
+ * Quick test function for manual verification in development
+ */
+export async function testWebhookSecurity(): Promise<void> {
+  const testResult = await WebhookTester.runAllTests();
+  
+  if (testResult.success) {
+    console.log('🎉 All webhook security features are working correctly!');
+  } else {
+    console.log('⚠️  Some webhook security tests failed. Please review the implementation.');
+    console.log('Test results:', testResult.results);
   }
 }

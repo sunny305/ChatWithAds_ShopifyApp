@@ -1,48 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import crypto from "node:crypto";
 import { ComplianceWebhookManager, type ComplianceWebhookPayload } from "../services/compliance-webhooks.server";
-
-function verifyShopifyWebhook(body: string, signature: string): boolean {
-  if (!signature) {
-    console.error("Missing HMAC signature header");
-    return false;
-  }
-
-  // Use Shopify API secret for webhook verification (standard practice)
-  const secret = process.env.SHOPIFY_API_SECRET;
-  if (!secret) {
-    console.error("SHOPIFY_API_SECRET environment variable not set");
-    return false;
-  }
-
-  console.log('HMAC verification debug:', {
-    hasBody: !!body,
-    bodyLength: body.length,
-    signature: signature,
-    hasSecret: !!secret
-  });
-
-  // Remove sha256= prefix if present
-  const cleanSignature = signature.replace('sha256=', '');
-  
-  const hmac = crypto.createHmac('sha256', secret);
-  hmac.update(body, 'utf8');
-  const computedSignature = hmac.digest('base64');
-  
-  console.log('HMAC comparison:', {
-    received: cleanSignature,
-    computed: computedSignature,
-    match: cleanSignature === computedSignature
-  });
-  
-  const isValid = crypto.timingSafeEqual(
-    Buffer.from(cleanSignature),
-    Buffer.from(computedSignature)
-  );
-  
-  return isValid;
-}
+import { WebhookSecurity } from "../utils/webhook-security.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method !== "POST") {
@@ -51,19 +10,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     const body = await request.text();
-    const signature = request.headers.get("x-shopify-hmac-sha256");
     
     console.log('Shop redact webhook received:', {
       method: request.method,
       hasBody: !!body,
       bodyLength: body.length,
-      hasSignature: !!signature,
+      hasSignature: !!WebhookSecurity.extractHmacSignature(request),
       url: request.url
     });
     
-    const isValid = verifyShopifyWebhook(body, signature || '');
-    if (!isValid) {
-      console.error("Invalid webhook signature - returning 401");
+    const verification = await WebhookSecurity.verifyWebhookRequest(request, body);
+    if (!verification.valid) {
+      console.error("HMAC verification failed:", verification.error);
       return json({ error: "Unauthorized" }, { status: 401 });
     }
     
